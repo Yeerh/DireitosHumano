@@ -1,244 +1,139 @@
-import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import type { RacaCor, Segmento, Terreiro } from "@/types/terreiro";
-import { addTerreiro } from "@/services/storage";
+import { useState } from "react";
+import { useNavigate, Link } from "react-router-dom";
+import { createUser, findUserByCpf, findUserByEmail } from "@/lib/users.storage";
+import type { PortalUser } from "@/lib/users.types";
+import { weakHash } from "@/context/AuthContext";
 
-const segmentos: Segmento[] = ["Candomblé", "Umbanda", "Jurema", "Culto tradicional Iorubá"];
-const racas: RacaCor[] = ["Preto", "Branco", "Pardo", "Amarelo", "Indígena"];
+function uid() {
+  return (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`).toString();
+}
 
-function onlyDigits(v: string) {
-  return v.replace(/\D/g, "");
+function onlyDigits(s: string) {
+  return s.replace(/\D/g, "");
+}
+
+function isEmailValid(email: string) {
+  return /^\S+@\S+\.\S+$/.test(email);
+}
+
+function validateCpfDigits(cpf: string) {
+  const d = onlyDigits(cpf);
+  return d.length === 11;
 }
 
 export default function Cadastro() {
   const nav = useNavigate();
 
-  const currentYear = useMemo(() => new Date().getFullYear(), []);
-  const [form, setForm] = useState({
-    nomeCasa: "",
-    anoFundacao: String(currentYear),
-    segmento: "Candomblé" as Segmento,
-    qtdFilhosSanto: "0",
-    endereco: "",
-    liderReligioso: "",
-    telefone: "",
-    email: "",
-    racaCor: "Preto" as RacaCor,
-  });
+  const [nome, setNome] = useState("");
+  const [email, setEmail] = useState("");
+  const [cpf, setCpf] = useState("");
+  const [telefone, setTelefone] = useState("");
+  const [senha, setSenha] = useState("");
 
-  const [errors, setErrors] = useState<Record<string, string>>({});
-
-  function validate() {
-    const e: Record<string, string> = {};
-    const ano = Number(form.anoFundacao);
-    const qtd = Number(form.qtdFilhosSanto);
-
-    if (!form.nomeCasa.trim()) e.nomeCasa = "Informe o nome da casa de axé.";
-    if (!Number.isFinite(ano) || ano < 1600 || ano > currentYear) {
-      e.anoFundacao = `Ano inválido. Use entre 1600 e ${currentYear}.`;
-    }
-    if (!Number.isFinite(qtd) || qtd < 0 || qtd > 99999) {
-      e.qtdFilhosSanto = "Quantidade inválida.";
-    }
-    if (!form.endereco.trim()) e.endereco = "Informe o endereço.";
-    if (!form.liderReligioso.trim()) e.liderReligioso = "Informe o líder religioso.";
-    if (!form.telefone.trim() || onlyDigits(form.telefone).length < 8) {
-      e.telefone = "Informe um telefone válido.";
-    }
-    if (!form.email.trim() || !/^\S+@\S+\.\S+$/.test(form.email)) {
-      e.email = "Informe um e-mail válido.";
-    }
-
-    setErrors(e);
-    return Object.keys(e).length === 0;
-  }
+  const [err, setErr] = useState<string | null>(null);
+  const [ok, setOk] = useState<string | null>(null);
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!validate()) return;
+    setErr(null);
+    setOk(null);
 
-    const payload: Terreiro = {
-      id: (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`).toString(),
-      nomeCasa: form.nomeCasa.trim(),
-      anoFundacao: Number(form.anoFundacao),
-      segmento: form.segmento,
-      qtdFilhosSanto: Number(form.qtdFilhosSanto),
-      endereco: form.endereco.trim(),
-      liderReligioso: form.liderReligioso.trim(),
-      telefone: form.telefone.trim(),
-      email: form.email.trim(),
-      racaCor: form.racaCor,
+    const eNorm = email.trim().toLowerCase();
+    const cpfDigits = onlyDigits(cpf);
+    const telDigits = onlyDigits(telefone);
+
+    if (!nome.trim()) return setErr("Informe o nome.");
+    if (!eNorm) return setErr("Informe o e-mail.");
+    if (!isEmailValid(eNorm)) return setErr("Informe um e-mail válido.");
+    if (!validateCpfDigits(cpfDigits)) return setErr("Informe um CPF válido (11 dígitos).");
+    if (telDigits.length < 10) return setErr("Informe telefone com DDD.");
+    if (!senha.trim() || senha.trim().length < 4) return setErr("A senha deve ter pelo menos 4 caracteres.");
+
+    // Validação de existentes
+    if (findUserByEmail(eNorm)) return setErr("Este e-mail já está cadastrado. Faça login.");
+    if (findUserByCpf(cpfDigits)) return setErr("Este CPF já está cadastrado. Faça login ou procure suporte.");
+
+    const user: PortalUser = {
+      id: uid(),
       createdAt: new Date().toISOString(),
+      nome: nome.trim(),
+      email: eNorm,
+      cpf: cpfDigits,
+      telefone: telefone.trim(),
+      senhaHash: weakHash(senha.trim()),
     };
 
-    addTerreiro(payload);
-    nav(`/detalhes/${payload.id}`);
+    createUser(user);
+    setOk("Cadastro realizado com sucesso. Agora faça login para iniciar a triagem.");
+    setTimeout(() => nav("/login"), 600);
   }
 
   return (
-    <div className="mx-auto max-w-3xl">
-      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-slate-900">Novo cadastro</h2>
-        <p className="mt-1 text-sm text-slate-600">
-          Preencha os dados para registrar uma casa de axé no mapeamento.
-        </p>
+    <div className="mx-auto max-w-lg rounded-2xl border border-slate-200 bg-white/90 p-8 shadow-sm backdrop-blur">
+      <h2 className="text-2xl font-semibold tracking-tight text-slate-900">Cadastro</h2>
+      <p className="mt-2 text-sm text-slate-700">
+        Para iniciar a triagem e realizar registros, é necessário criar um acesso e depois fazer login.
+      </p>
 
-        <form onSubmit={onSubmit} className="mt-6 space-y-5">
-          {/* Nome */}
+      {err && (
+        <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {err}
+        </div>
+      )}
+      {ok && (
+        <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          {ok}
+        </div>
+      )}
+
+      <form onSubmit={onSubmit} className="mt-6 space-y-4">
+        <div>
+          <label className="label">Nome</label>
+          <input className="input" value={nome} onChange={(e) => setNome(e.target.value)} />
+        </div>
+
+        <div>
+          <label className="label">E-mail *</label>
+          <input
+            className="input"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="exemplo@dominio.com"
+          />
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
           <div>
-            <label className="text-sm font-medium text-slate-800">Nome da casa de Axé</label>
-            <input
-              className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 outline-none focus:ring-4 focus:ring-[#1b4c7d]/20"
-              value={form.nomeCasa}
-              onChange={(ev) => setForm((s) => ({ ...s, nomeCasa: ev.target.value }))}
-              placeholder="Ex.: Ilê Axé ..."
-            />
-            {errors.nomeCasa && <p className="mt-1 text-xs text-red-600">{errors.nomeCasa}</p>}
+            <label className="label">CPF *</label>
+            <input className="input" value={cpf} onChange={(e) => setCpf(e.target.value)} placeholder="000.000.000-00" />
           </div>
 
-          {/* Ano + Qtd */}
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <label className="text-sm font-medium text-slate-800">Ano de fundação</label>
-              <input
-                type="number"
-                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 outline-none focus:ring-4 focus:ring-[#1b4c7d]/20"
-                value={form.anoFundacao}
-                onChange={(ev) => setForm((s) => ({ ...s, anoFundacao: ev.target.value }))}
-              />
-              {errors.anoFundacao && <p className="mt-1 text-xs text-red-600">{errors.anoFundacao}</p>}
-            </div>
-
-            <div>
-              <label className="text-sm font-medium text-slate-800">
-                Quantidade de filhos/filhas de santo
-              </label>
-              <input
-                type="number"
-                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 outline-none focus:ring-4 focus:ring-[#1b4c7d]/20"
-                value={form.qtdFilhosSanto}
-                onChange={(ev) => setForm((s) => ({ ...s, qtdFilhosSanto: ev.target.value }))}
-                min={0}
-              />
-              {errors.qtdFilhosSanto && (
-                <p className="mt-1 text-xs text-red-600">{errors.qtdFilhosSanto}</p>
-              )}
-            </div>
-          </div>
-
-          {/* Segmento */}
           <div>
-            <label className="text-sm font-medium text-slate-800">Qual segmento?</label>
-            <div className="mt-2 grid gap-2 sm:grid-cols-2">
-              {segmentos.map((seg) => (
-                <label
-                  key={seg}
-                  className="flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3"
-                >
-                  <input
-                    type="radio"
-                    name="segmento"
-                    checked={form.segmento === seg}
-                    onChange={() => setForm((s) => ({ ...s, segmento: seg }))}
-                  />
-                  <span className="text-sm text-slate-800">{seg}</span>
-                </label>
-              ))}
-            </div>
+            <label className="label">Telefone (DDD) *</label>
+            <input className="input" value={telefone} onChange={(e) => setTelefone(e.target.value)} placeholder="(81) 9xxxx-xxxx" />
           </div>
+        </div>
 
-          {/* Endereço */}
-          <div>
-            <label className="text-sm font-medium text-slate-800">Endereço</label>
-            <textarea
-              className="mt-2 min-h-[90px] w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 outline-none focus:ring-4 focus:ring-[#1b4c7d]/20"
-              value={form.endereco}
-              onChange={(ev) => setForm((s) => ({ ...s, endereco: ev.target.value }))}
-              placeholder="Rua, número, bairro, cidade/UF"
-            />
-            {errors.endereco && <p className="mt-1 text-xs text-red-600">{errors.endereco}</p>}
-          </div>
+        <div>
+          <label className="label">Senha *</label>
+          <input className="input" type="password" value={senha} onChange={(e) => setSenha(e.target.value)} />
+          <p className="mt-1 text-xs text-slate-500">Mínimo de 4 caracteres (MVP).</p>
+        </div>
 
-          {/* Líder */}
-          <div>
-            <label className="text-sm font-medium text-slate-800">Nome do líder religioso</label>
-            <input
-              className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 outline-none focus:ring-4 focus:ring-[#1b4c7d]/20"
-              value={form.liderReligioso}
-              onChange={(ev) => setForm((s) => ({ ...s, liderReligioso: ev.target.value }))}
-              placeholder="Nome completo"
-            />
-            {errors.liderReligioso && (
-              <p className="mt-1 text-xs text-red-600">{errors.liderReligioso}</p>
-            )}
-          </div>
+        <button
+          className="w-full rounded-xl bg-[#1b4c7d] px-4 py-3 text-sm font-semibold text-white hover:bg-[#163e66] focus:outline-none focus:ring-4 focus:ring-[#1b4c7d]/20"
+          type="submit"
+        >
+          Criar conta
+        </button>
 
-          {/* Contato */}
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <label className="text-sm font-medium text-slate-800">Telefone</label>
-              <input
-                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 outline-none focus:ring-4 focus:ring-[#1b4c7d]/20"
-                value={form.telefone}
-                onChange={(ev) => setForm((s) => ({ ...s, telefone: ev.target.value }))}
-                placeholder="(81) 9xxxx-xxxx"
-              />
-              {errors.telefone && <p className="mt-1 text-xs text-red-600">{errors.telefone}</p>}
-            </div>
-
-            <div>
-              <label className="text-sm font-medium text-slate-800">E-mail</label>
-              <input
-                type="email"
-                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 outline-none focus:ring-4 focus:ring-[#1b4c7d]/20"
-                value={form.email}
-                onChange={(ev) => setForm((s) => ({ ...s, email: ev.target.value }))}
-                placeholder="contato@..."
-              />
-              {errors.email && <p className="mt-1 text-xs text-red-600">{errors.email}</p>}
-            </div>
-          </div>
-
-          {/* Raça/cor */}
-          <div>
-            <label className="text-sm font-medium text-slate-800">Raça/cor</label>
-            <div className="mt-2 grid gap-2 sm:grid-cols-3">
-              {racas.map((r) => (
-                <label
-                  key={r}
-                  className="flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3"
-                >
-                  <input
-                    type="radio"
-                    name="racaCor"
-                    checked={form.racaCor === r}
-                    onChange={() => setForm((s) => ({ ...s, racaCor: r }))}
-                  />
-                  <span className="text-sm text-slate-800">{r}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-
-          {/* Ações */}
-          <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
-            <button
-              type="button"
-              onClick={() => nav("/")}
-              className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 hover:bg-slate-50"
-            >
-              Cancelar
-            </button>
-
-            <button
-              type="submit"
-              className="rounded-xl bg-[#1b4c7d] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#163e66] focus:outline-none focus:ring-4 focus:ring-[#1b4c7d]/25"
-            >
-              Salvar cadastro
-            </button>
-          </div>
-        </form>
-      </div>
+        <div className="text-center text-sm text-slate-600">
+          Já tem conta?{" "}
+          <Link to="/login" className="font-semibold text-[#1b4c7d] hover:underline">
+            Fazer login
+          </Link>
+        </div>
+      </form>
     </div>
   );
 }

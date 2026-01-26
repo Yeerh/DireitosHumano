@@ -23,20 +23,13 @@ export default function Navbar() {
     <header className="sticky top-0 z-20">
       <div className="nav-gradient nav-shadow">
         <div className="mx-auto w-full max-w-6xl px-4">
-          {/* altura do navbar para comportar logo 150 */}
-          <div className="flex items-center justify-between gap-4 py-3">
-            {/* Brand */}
-            <div className="flex items-center gap-4">
-              <img src={Logo} alt="Prefeitura do Paulista" className="navbar-logo" />
-
-              <div className="hidden sm:block leading-tight">
-                <div className="h3">Portal dos Direitos Humanos</div>
-                <div className="muted">Prefeitura do Paulista</div>
-              </div>
-            </div>
+        <div className="navbar-shell">
+  <NavLink to="/" className="navbar-brand">
+    <img src={Logo} alt="Prefeitura do Paulista" className="navbar-logo" />
+  </NavLink>
 
             {/* Desktop nav */}
-            <nav className="hidden items-center gap-2 md:flex">
+            <nav className="navbar-menu hidden md:flex">
               {items.map((it) => (
                 <NavLink key={it.to} to={it.to} className={linkClass} onClick={() => setOpen(false)}>
                   {it.label}
@@ -47,9 +40,9 @@ export default function Navbar() {
             {/* Mobile button */}
             <button
               type="button"
-              className="md:hidden rounded-xl border border-slate-200 bg-white/60 px-3 py-2 text-sm font-semibold text-slate-800 backdrop-blur hover:bg-white/80"
-              aria-label="Abrir menu"
-              onClick={() => setOpen((s) => !s)}
+              className="navbar-mobile md:hidden"
+              aria-label={open ? "Fechar menu" : "Abrir menu"}
+              onClick={() => setOpen((v) => !v)}
             >
               {open ? "Fechar" : "Menu"}
             </button>
@@ -58,7 +51,7 @@ export default function Navbar() {
 
         {/* Mobile dropdown */}
         {open && (
-          <div className="md:hidden border-t border-slate-200/70 bg-white/50 backdrop-blur">
+          <div className="navbar-dropdown md:hidden">
             <div className="mx-auto w-full max-w-6xl px-4 py-3">
               <div className="flex flex-col gap-2">
                 {items.map((it) => (

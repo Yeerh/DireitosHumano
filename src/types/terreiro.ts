@@ -1,5 +1,5 @@
-export type Segmento = "Candomblé" | "Umbanda" | "Jurema" | "Culto tradicional Iorubá";
-export type RacaCor = "Preto" | "Branco" | "Pardo" | "Amarelo" | "Indígena";
+export type Segmento = "Candombl\u00e9" | "Umbanda" | "Jurema" | "Culto tradicional Iorub\u00e1";
+export type RacaCor = "Preto" | "Branco" | "Pardo" | "Amarelo" | "Ind\u00edgena";
 
 export type Terreiro = {
   id: string;
@@ -12,5 +12,5 @@ export type Terreiro = {
   telefone: string;
   email: string;
   racaCor: RacaCor;
-  createdAt: string; // ISO
+  createdAt: string;
 };

@@ -1,306 +1,425 @@
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { useAuth } from "@/context/AuthContext";
-import { isQuestionarioCompleto } from "@/lib/flow.storage";
+import { addEvent, deleteEvent, loadEvents } from "@/lib/calendar.storage";
+import type { CalendarEvent } from "@/lib/calendar.types";
+import { loadTerreiros } from "@/services/storage";
+import type { Terreiro } from "@/types/terreiro";
 
-/**
- * Regras do fluxo (como você pediu):
- * 1) Primeiro faz CADASTRO (criar conta)
- * 2) Depois faz LOGIN
- * 3) Só então pode iniciar TRIAGEM e registrar
- *
- * Observação:
- * - Aqui eu estou usando isQuestionarioCompleto() como "triagem concluída".
- * - Você pode renomear depois se quiser.
- */
+type DayCell = {
+  ymd: string;
+  day: number;
+  inMonth: boolean;
+};
+
+function uid() {
+  return (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`).toString();
+}
+
+function pad2(n: number) {
+  return String(n).padStart(2, "0");
+}
+
+function toYMD(d: Date) {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+function monthLabel(d: Date) {
+  return d.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+}
+
+function weekdayMon0(date: Date) {
+  return (date.getDay() + 6) % 7;
+}
+
+function buildMonthDays(refDate: Date): DayCell[] {
+  const year = refDate.getFullYear();
+  const month = refDate.getMonth();
+  const first = new Date(year, month, 1);
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const leading = weekdayMon0(first);
+  const totalCells = Math.ceil((leading + daysInMonth) / 7) * 7;
+
+  return Array.from({ length: totalCells }, (_, i) => {
+    const dayOffset = i - leading + 1;
+    const current = new Date(year, month, dayOffset);
+    return {
+      ymd: toYMD(current),
+      day: current.getDate(),
+      inMonth: dayOffset >= 1 && dayOffset <= daysInMonth,
+    };
+  });
+}
 
 export default function Home() {
-  const { isAuthenticated } = useAuth();
-  const triagemOk = isQuestionarioCompleto();
+  const [query, setQuery] = useState("");
+  const [refresh, setRefresh] = useState(0);
+  const [month, setMonth] = useState(() => new Date());
+  const [selected, setSelected] = useState(() => toYMD(new Date()));
+  const [modalOpen, setModalOpen] = useState(false);
+  const [newEvent, setNewEvent] = useState({
+    date: toYMD(new Date()),
+    title: "",
+    description: "",
+    location: "",
+  });
 
-  // Ajuste aqui se o seu cadastro estiver em outra rota
-  const CADASTRO_ROUTE = "/cadastro";
-  const LOGIN_ROUTE = "/login";
-  const TRIAGEM_ROUTE = "/questionario";
+  const terreiros = useMemo(() => loadTerreiros(), [refresh]);
+  const events = useMemo(() => loadEvents(), [refresh]);
 
-  function getPrimaryCTA() {
-    if (!isAuthenticated) {
-      return { to: CADASTRO_ROUTE, label: "Criar acesso (cadastro)" };
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return terreiros;
+
+    return terreiros.filter((item) => {
+      const blob = [
+        item.nomeCasa,
+        item.liderReligioso,
+        item.endereco,
+        item.segmento,
+        item.email,
+        item.telefone,
+        item.racaCor,
+      ]
+        .join(" ")
+        .toLowerCase();
+
+      return blob.includes(q);
+    });
+  }, [query, terreiros]);
+
+  const monthDays = useMemo(() => buildMonthDays(month), [month]);
+
+  const eventsByDate = useMemo(() => {
+    const map = new Map<string, CalendarEvent[]>();
+
+    for (const event of events) {
+      const list = map.get(event.date) ?? [];
+      list.push(event);
+      map.set(event.date, list);
     }
-    if (!triagemOk) {
-      return { to: TRIAGEM_ROUTE, label: "Iniciar triagem" };
-    }
-    return { to: "/cadastro-terreiro", label: "Acessar serviços do portal" };
+
+    return map;
+  }, [events]);
+
+  const selectedEvents = useMemo(() => eventsByDate.get(selected) ?? [], [eventsByDate, selected]);
+
+  const monthEventsCount = useMemo(() => {
+    const key = `${month.getFullYear()}-${pad2(month.getMonth() + 1)}-`;
+    return events.filter((event) => event.date.startsWith(key)).length;
+  }, [events, month]);
+
+  function prevMonth() {
+    setMonth((current) => new Date(current.getFullYear(), current.getMonth() - 1, 1));
   }
 
-  const primary = getPrimaryCTA();
+  function nextMonth() {
+    setMonth((current) => new Date(current.getFullYear(), current.getMonth() + 1, 1));
+  }
+
+  function openEventModal(date?: string) {
+    const eventDate = date ?? selected;
+    setNewEvent({ date: eventDate, title: "", description: "", location: "" });
+    setModalOpen(true);
+  }
+
+  function saveEvent() {
+    if (newEvent.title.trim().length < 3) return;
+
+    addEvent({
+      id: uid(),
+      date: newEvent.date,
+      title: newEvent.title.trim(),
+      description: newEvent.description.trim() || undefined,
+      location: newEvent.location.trim() || undefined,
+      createdAt: new Date().toISOString(),
+    });
+
+    setModalOpen(false);
+    setRefresh((current) => current + 1);
+  }
 
   return (
-    <div className="space-y-6">
-      {/* HERO */}
-      <section className="rounded-2xl border border-slate-200 bg-white/90 p-8 shadow-sm backdrop-blur">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="max-w-2xl">
-            <h1 className="text-3xl font-semibold tracking-tight text-slate-900">
-              Portal dos Direitos Humanos
-            </h1>
-            <p className="mt-3 text-base leading-relaxed text-slate-700">
-              Plataforma dedicada ao fortalecimento de políticas públicas, com foco no{" "}
-              <strong>mapeamento e cadastro de Terreiros de Umbanda</strong> e no{" "}
-              <strong>registro de atendimentos e demandas LGBTQIAPN+</strong>.
-            </p>
+    <div className="split-grid">
+      <section className="panel panel-hero">
+        <div className="panel-body">
+          <div className="panel-head">
+            <div>
+              <h2 className="page-title">Painel de mapeamento</h2>
+              <p className="page-subtitle">
+                Consulte registros, acompanhe eventos e mantenha o sistema sempre atualizado.
+              </p>
+            </div>
 
-            <div className="mt-5 flex flex-col gap-2 sm:flex-row">
-              <Link
-                to={primary.to}
-                className="inline-flex items-center justify-center rounded-xl bg-[#1b4c7d] px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-[#163e66] focus:outline-none focus:ring-4 focus:ring-[#1b4c7d]/20"
-              >
-                {primary.label}
+            <div className="actions-row">
+              <Link to="/cadastro" className="btn btn-primary">
+                Novo cadastro
               </Link>
-
-              {!isAuthenticated ? (
-                <Link
-                  to={LOGIN_ROUTE}
-                  className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-800 hover:bg-slate-50"
-                >
-                  Já tenho conta (login)
-                </Link>
-              ) : (
-                <Link
-                  to="/denuncias"
-                  className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-800 hover:bg-slate-50"
-                >
-                  Denúncias & Sugestões
-                </Link>
-              )}
+              <button type="button" className="btn btn-secondary" onClick={() => openEventModal()}>
+                Novo evento
+              </button>
             </div>
           </div>
 
-          {/* STATUS */}
-          <div className="grid w-full max-w-md gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-5">
-            <div className="text-sm font-semibold text-slate-900">Status de acesso</div>
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="rounded-xl bg-white p-4">
-                <div className="text-xs font-semibold text-slate-500">Cadastro/Login</div>
-                <div className="mt-1 text-sm font-semibold">
-                  <span className={isAuthenticated ? "text-emerald-700" : "text-slate-700"}>
-                    {isAuthenticated ? "Autenticado" : "Não autenticado"}
-                  </span>
-                </div>
-                <div className="mt-1 text-xs text-slate-500">
-                  {isAuthenticated ? "Acesso liberado" : "É necessário criar conta e entrar"}
-                </div>
-              </div>
-
-              <div className="rounded-xl bg-white p-4">
-                <div className="text-xs font-semibold text-slate-500">Triagem</div>
-                <div className="mt-1 text-sm font-semibold">
-                  <span className={triagemOk ? "text-emerald-700" : "text-slate-700"}>
-                    {triagemOk ? "Concluída" : "Pendente"}
-                  </span>
-                </div>
-                <div className="mt-1 text-xs text-slate-500">
-                  {triagemOk ? "Você já pode registrar" : "Obrigatória antes do registro"}
-                </div>
-              </div>
+          <div className="quick-stats">
+            <div className="stat-box">
+              <p className="stat-label">Registros totais</p>
+              <p className="stat-value">{terreiros.length}</p>
             </div>
+            <div className="stat-box">
+              <p className="stat-label">Resultado da busca</p>
+              <p className="stat-value">{filtered.length}</p>
+            </div>
+            <div className="stat-box">
+              <p className="stat-label">{"Eventos no m\u00eas"}</p>
+              <p className="stat-value">{monthEventsCount}</p>
+            </div>
+          </div>
 
-            {!isAuthenticated && (
-              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
-                Para iniciar a triagem e usar os serviços, primeiro realize o <strong>cadastro</strong> e em seguida
-                faça <strong>login</strong>.
-              </div>
-            )}
+          <div className="search-row">
+            <input
+              className="field-input"
+              placeholder={"Buscar por nome da casa, l\u00edder, endere\u00e7o, segmento ou contato"}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+            <button type="button" className="btn btn-secondary" onClick={() => setRefresh((current) => current + 1)}>
+              Atualizar dados
+            </button>
           </div>
         </div>
       </section>
 
-      {/* PARA QUE SERVE */}
-      <section className="rounded-2xl border border-slate-200 bg-white/90 p-8 shadow-sm backdrop-blur">
-        <h2 className="text-xl font-semibold text-slate-900">Finalidade do Portal</h2>
-        <p className="mt-2 text-sm leading-relaxed text-slate-700">
-          O portal centraliza registros, orientações e encaminhamentos, garantindo organização, rastreabilidade e melhor
-          direcionamento dos atendimentos.
-        </p>
-
-        <div className="mt-6 grid gap-4 lg:grid-cols-3">
-          <div className="rounded-2xl border border-slate-200 bg-white p-6">
-            <div className="text-sm font-semibold text-slate-900">Cadastro de Terreiros (Umbanda)</div>
-            <p className="mt-2 text-sm text-slate-700">
-              Registro institucional do terreiro: informações básicas, endereço, liderança religiosa e contato.
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-slate-200 bg-white p-6">
-            <div className="text-sm font-semibold text-slate-900">Atendimento LGBTQIAPN+</div>
-            <p className="mt-2 text-sm text-slate-700">
-              Registro de demandas e solicitações para acolhimento, orientação e encaminhamentos.
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-slate-200 bg-white p-6">
-            <div className="text-sm font-semibold text-slate-900">Denúncias & Sugestões</div>
-            <p className="mt-2 text-sm text-slate-700">
-              Canal dedicado para relatos e melhorias, ajudando o monitoramento e a qualidade do serviço.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      {/* COMO FUNCIONA (CADASTRO -> LOGIN -> TRIAGEM -> REGISTRO) */}
-      <section className="rounded-2xl border border-slate-200 bg-white/90 p-8 shadow-sm backdrop-blur">
-        <h2 className="text-xl font-semibold text-slate-900">Como acessar os serviços</h2>
-        <p className="mt-2 text-sm text-slate-700">
-          Para segurança e controle de acesso, o registro só é liberado após cadastro e autenticação.
-        </p>
-
-        <ol className="mt-6 grid gap-3 lg:grid-cols-3">
-          <li className="rounded-2xl border border-slate-200 bg-white p-6">
-            <div className="text-xs font-semibold text-slate-500">Etapa 1</div>
-            <div className="mt-1 text-sm font-semibold text-slate-900">Cadastro</div>
-            <p className="mt-2 text-sm text-slate-700">
-              Crie seu acesso para iniciar a triagem e utilizar os serviços do portal.
-            </p>
-            <div className="mt-4">
-              <Link
-                to={CADASTRO_ROUTE}
-                className="inline-flex w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 hover:bg-slate-50"
-              >
-                Ir para cadastro
-              </Link>
+      <section className="calendar-layout">
+        <article className="panel">
+          <div className="panel-body">
+            <div className="panel-head">
+              <h3 className="page-title" style={{ fontSize: "1.24rem" }}>
+                {"Calend\u00e1rio institucional"}
+              </h3>
+              <div className="actions-row">
+                <button type="button" className="btn btn-secondary" onClick={prevMonth}>
+                  {"<"}
+                </button>
+                <button type="button" className="btn btn-secondary" onClick={nextMonth}>
+                  {">"}
+                </button>
+              </div>
             </div>
-          </li>
 
-          <li className="rounded-2xl border border-slate-200 bg-white p-6">
-            <div className="text-xs font-semibold text-slate-500">Etapa 2</div>
-            <div className="mt-1 text-sm font-semibold text-slate-900">Login</div>
-            <p className="mt-2 text-sm text-slate-700">
-              Entre com seu acesso para liberar a triagem e ações de registro.
+            <p className="page-subtitle month-chip" style={{ textTransform: "capitalize" }}>
+              {monthLabel(month)}
             </p>
-            <div className="mt-4">
-              <Link
-                to={LOGIN_ROUTE}
-                className="inline-flex w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 hover:bg-slate-50"
-              >
-                Ir para login
-              </Link>
+
+            <div className="calendar-grid calendar-head">
+              {["Seg", "Ter", "Qua", "Qui", "Sex", "Sab", "Dom"].map((day) => (
+                <div key={day} className="calendar-weekday">
+                  {day}
+                </div>
+              ))}
             </div>
-          </li>
 
-          <li className="rounded-2xl border border-slate-200 bg-white p-6">
-            <div className="text-xs font-semibold text-slate-500">Etapa 3</div>
-            <div className="mt-1 text-sm font-semibold text-slate-900">Triagem e Registro</div>
-            <p className="mt-2 text-sm text-slate-700">
-              Após login, realize a triagem e então registre: Terreiro (Umbanda) ou Atendimento LGBTQIAPN+.
-            </p>
-            <div className="mt-4">
-              <Link
-                to={TRIAGEM_ROUTE}
-                className="inline-flex w-full items-center justify-center rounded-xl bg-[#1b4c7d] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#163e66]"
-              >
-                Iniciar triagem
-              </Link>
+            <div className="calendar-grid">
+              {monthDays.map((day) => {
+                const hasEvents = (eventsByDate.get(day.ymd)?.length ?? 0) > 0;
+                const isSelected = selected === day.ymd;
+
+                return (
+                  <button
+                    key={day.ymd}
+                    type="button"
+                    className={`day-button${!day.inMonth ? " outside" : ""}${isSelected ? " selected" : ""}`}
+                    onClick={() => setSelected(day.ymd)}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-bold">{day.day}</span>
+                      {hasEvents ? <span className="dot" /> : null}
+                    </div>
+                  </button>
+                );
+              })}
             </div>
-          </li>
-        </ol>
-      </section>
 
-      {/* CARDS DE DESTINO */}
-      <section className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-2xl border border-slate-200 bg-white/90 p-8 shadow-sm backdrop-blur">
-          <h3 className="text-lg font-semibold text-slate-900">Cadastro de Terreiro</h3>
-          <p className="mt-2 text-sm text-slate-700">
-            Acesse o formulário de cadastro institucional do Terreiro de Umbanda.
-          </p>
+            <div className="mt-4 flex justify-end">
+              <button type="button" className="btn btn-primary" onClick={() => openEventModal(selected)}>
+                Adicionar em {selected}
+              </button>
+            </div>
+          </div>
+        </article>
 
-          <div className="mt-5 flex flex-col gap-2 sm:flex-row">
-            {!isAuthenticated ? (
-              <>
-                <Link
-                  to={CADASTRO_ROUTE}
-                  className="inline-flex items-center justify-center rounded-xl bg-[#1b4c7d] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#163e66]"
-                >
-                  Criar acesso
-                </Link>
-                <Link
-                  to={LOGIN_ROUTE}
-                  className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 hover:bg-slate-50"
-                >
-                  Já tenho conta
-                </Link>
-              </>
+        <article className="panel">
+          <div className="panel-body">
+            <div className="panel-head">
+              <h3 className="page-title" style={{ fontSize: "1.2rem" }}>
+                Eventos do dia
+              </h3>
+              <span className="text-xs font-semibold text-slate-500">{selected}</span>
+            </div>
+
+            {selectedEvents.length === 0 ? (
+              <p className="page-subtitle">Nenhum evento para a data selecionada.</p>
             ) : (
-              <>
-                <Link
-                  to={TRIAGEM_ROUTE}
-                  className="inline-flex items-center justify-center rounded-xl bg-[#1b4c7d] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#163e66]"
-                >
-                  Fazer triagem
-                </Link>
-                <Link
-                  to="/cadastro-terreiro"
-                  className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 hover:bg-slate-50"
-                >
-                  Ir para cadastro do Terreiro
-                </Link>
-              </>
+              <div className="event-list">
+                {selectedEvents.map((event) => (
+                  <div key={event.id} className="event-card">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="m-0 text-sm font-bold text-slate-900">{event.title}</p>
+                        {event.location ? (
+                          <p className="mt-1 text-xs font-semibold text-slate-600">{event.location}</p>
+                        ) : null}
+                        {event.description ? (
+                          <p className="mt-1 text-xs text-slate-600">{event.description}</p>
+                        ) : null}
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => {
+                          deleteEvent(event.id);
+                          setRefresh((current) => current + 1);
+                        }}
+                      >
+                        Remover
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
+        </article>
+      </section>
 
-          {!triagemOk && isAuthenticated && (
-            <p className="mt-3 text-xs text-slate-500">
-              Observação: o registro só é recomendado após finalizar a triagem.
-            </p>
-          )}
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-white/90 p-8 shadow-sm backdrop-blur">
-          <h3 className="text-lg font-semibold text-slate-900">Atendimento LGBTQIAPN+</h3>
-          <p className="mt-2 text-sm text-slate-700">
-            Registre demandas para acolhimento, orientação e encaminhamentos.
-          </p>
-
-          <div className="mt-5 flex flex-col gap-2 sm:flex-row">
-            {!isAuthenticated ? (
-              <>
-                <Link
-                  to={CADASTRO_ROUTE}
-                  className="inline-flex items-center justify-center rounded-xl bg-[#1b4c7d] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#163e66]"
-                >
-                  Criar acesso
-                </Link>
-                <Link
-                  to={LOGIN_ROUTE}
-                  className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 hover:bg-slate-50"
-                >
-                  Já tenho conta
-                </Link>
-              </>
-            ) : (
-              <>
-                <Link
-                  to={TRIAGEM_ROUTE}
-                  className="inline-flex items-center justify-center rounded-xl bg-[#1b4c7d] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#163e66]"
-                >
-                  Fazer triagem
-                </Link>
-                <Link
-                  to="/atendimento"
-                  className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 hover:bg-slate-50"
-                >
-                  Ir para Atendimento
-                </Link>
-              </>
-            )}
+      <section className="panel">
+        <div className="panel-body">
+          <div className="panel-head">
+            <div>
+              <h3 className="page-title" style={{ fontSize: "1.24rem" }}>
+                Lista de casas cadastradas
+              </h3>
+              <p className="page-subtitle">
+                {"Dados dispon\u00edveis para consulta r\u00e1pida e navega\u00e7\u00e3o de detalhes."}
+              </p>
+            </div>
           </div>
 
-          {!triagemOk && isAuthenticated && (
-            <p className="mt-3 text-xs text-slate-500">
-              Observação: o registro só é recomendado após finalizar a triagem.
+          {filtered.length === 0 ? (
+            <p className="page-subtitle" style={{ marginTop: "0.9rem" }}>
+              {"Nenhum registro encontrado. Use o bot\u00e3o de novo cadastro para iniciar."}
             </p>
+          ) : (
+            <div className="table-wrap" style={{ marginTop: "0.9rem" }}>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Casa</th>
+                    <th>Segmento</th>
+                    <th>{"L\u00edder"}</th>
+                    <th>Ano</th>
+                    <th>{"A\u00e7\u00f5es"}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((item: Terreiro) => (
+                    <tr key={item.id}>
+                      <td className="font-bold text-slate-900">{item.nomeCasa}</td>
+                      <td>{item.segmento}</td>
+                      <td>{item.liderReligioso}</td>
+                      <td>{item.anoFundacao}</td>
+                      <td>
+                        <Link to={`/detalhes/${item.id}`} className="btn btn-secondary">
+                          Ver detalhes
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       </section>
+
+      {modalOpen ? (
+        <div className="modal-backdrop" role="dialog" aria-modal="true">
+          <div className="modal-card">
+            <div className="panel-body">
+              <h4 className="page-title" style={{ fontSize: "1.15rem" }}>
+                Novo evento
+              </h4>
+              <p className="page-subtitle">Preencha os campos para registrar uma nova atividade.</p>
+
+              <div className="field-group" style={{ marginTop: "1rem" }}>
+                <div>
+                  <label className="field-label" htmlFor="event-date">
+                    Data
+                  </label>
+                  <input
+                    id="event-date"
+                    type="date"
+                    className="field-input"
+                    value={newEvent.date}
+                    onChange={(event) => setNewEvent((state) => ({ ...state, date: event.target.value }))}
+                  />
+                </div>
+
+                <div>
+                  <label className="field-label" htmlFor="event-title">
+                    {"T\u00edtulo"}
+                  </label>
+                  <input
+                    id="event-title"
+                    className="field-input"
+                    value={newEvent.title}
+                    onChange={(event) => setNewEvent((state) => ({ ...state, title: event.target.value }))}
+                    placeholder={"Ex.: reuni\u00e3o de lideran\u00e7as"}
+                  />
+                  <p className="field-help">Use pelo menos 3 caracteres.</p>
+                </div>
+
+                <div>
+                  <label className="field-label" htmlFor="event-location">
+                    Local (opcional)
+                  </label>
+                  <input
+                    id="event-location"
+                    className="field-input"
+                    value={newEvent.location}
+                    onChange={(event) => setNewEvent((state) => ({ ...state, location: event.target.value }))}
+                  />
+                </div>
+
+                <div>
+                  <label className="field-label" htmlFor="event-description">
+                    {"Descri\u00e7\u00e3o (opcional)"}
+                  </label>
+                  <textarea
+                    id="event-description"
+                    className="field-textarea"
+                    value={newEvent.description}
+                    onChange={(event) => setNewEvent((state) => ({ ...state, description: event.target.value }))}
+                  />
+                </div>
+              </div>
+
+              <div className="actions-row" style={{ justifyContent: "flex-end", marginTop: "1rem" }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setModalOpen(false)}>
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={saveEvent}
+                  disabled={newEvent.title.trim().length < 3}
+                >
+                  Salvar evento
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

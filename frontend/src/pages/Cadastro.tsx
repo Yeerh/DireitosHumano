@@ -430,7 +430,7 @@ export default function Cadastro() {
 
               <div>
                 <label className="field-label" htmlFor="numero-vinculo">
-                  N\u00famero
+                Número de telefone
                 </label>
                 <input
                   id="numero-vinculo"

@@ -223,7 +223,7 @@ export default function Login() {
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <label className="field-label" htmlFor="numero">
-                  N\u00famero
+                  Número de telefone
                 </label>
                 <input
                   id="numero"

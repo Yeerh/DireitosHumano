@@ -1,0 +1,103 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// --- Usuário do sistema (login/cadastro) ---
+model User {
+  id        String   @id @default(uuid())
+  cpf       String   @unique
+  email     String   @unique
+  numero    String
+  nome      String
+  login     String   @unique
+  senha     String   // hash bcrypt
+  createdAt DateTime @default(now())
+
+  @@map("users")
+}
+
+// --- Segmento e raça/cor (identificadores ASCII para Prisma) ---
+enum Segmento {
+  Candomble
+  Umbanda
+  Jurema
+  Culto_tradicional_Ioruba
+}
+
+enum RacaCor {
+  Preto
+  Branco
+  Pardo
+  Amarelo
+  Indigena
+}
+
+// --- Terreiro ---
+model Terreiro {
+  id              String   @id @default(uuid())
+  nomeCasa        String
+  anoFundacao     Int
+  segmento        Segmento
+  qtdFilhosSanto  Int      @default(0)
+  endereco        String
+  liderReligioso  String
+  telefone        String
+  email           String
+  racaCor         RacaCor
+  createdAt       DateTime @default(now())
+
+  vinculos Vinculo[]
+  @@map("terreiros")
+}
+
+// --- Vínculo (pessoa vinculada a um terreiro) ---
+model Vinculo {
+  id         String   @id @default(uuid())
+  terreiroId String
+  nomePessoa String
+  cpf        String
+  email      String
+  numero     String
+  funcao     String?
+  createdAt  DateTime @default(now())
+
+  terreiro Terreiro @relation(fields: [terreiroId], references: [id], onDelete: Cascade)
+  @@index([terreiroId])
+  @@map("vinculos")
+}
+
+// --- Denúncia / Sugestão ---
+enum DenunciaTipo {
+  Denuncia
+  Sugestao
+}
+
+enum DenunciaCategoria {
+  Discriminacao_Intolerancia_religiosa
+  Vandalismo_Dano_patrimonio
+  Ameaca_Assedio
+  Conflito_vizinhanca
+  Outros
+}
+
+model Denuncia {
+  id            String            @id @default(uuid())
+  tipo          DenunciaTipo
+  categoria     DenunciaCategoria
+  titulo        String
+  mensagem      String
+  localOcorrido String?
+  anonimo       Boolean           @default(true)
+  nome          String?
+  telefone      String?
+  email         String?
+  status        String            @default("Recebido")
+  createdAt     DateTime          @default(now())
+
+  @@map("denuncias")
+}
